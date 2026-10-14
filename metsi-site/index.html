@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>METSI</title>
+<style>
+/* Brand tokens: swap these to match your logo */
+:root{--bg:#0a1230;--fg:#eef0f6;--accent:#ffd23f;--muted:#8d95b3;--font:"Helvetica Neue",Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);line-height:1.55}
+main{max-width:620px;margin:0 auto;padding:56px 20px 80px;display:grid;gap:72px}
+h2{font-size:1.5rem;font-weight:700;margin:0 0 18px;display:flex;align-items:center;gap:12px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent);display:none}
+.dot.on{display:inline-block}
+@media (prefers-reduced-motion:no-preference){.dot.on{animation:pulse 1.8s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.25}}
+.msg h3{margin:0;font-size:1.15rem}
+.msg time{color:var(--muted);font-size:.85rem}
+.msg p{margin:8px 0 0;font-size:1.05rem;white-space:pre-wrap}
+details{margin-top:22px;color:var(--muted)}
+summary{cursor:pointer}
+details .msg{margin-top:18px;color:var(--fg)}
+textarea{width:100%;background:transparent;color:var(--fg);border:2px solid var(--fg);border-radius:0;padding:12px;font:inherit;font-size:1.05rem;resize:vertical}
+canvas{display:block;width:100%;height:auto;margin:16px 0;border:1px solid var(--muted)}
+button{background:var(--accent);color:#0a1230;border:0;padding:14px 22px;font:inherit;font-weight:700;cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+</style>
+</head>
+<body>
+<main>
+  <section id="creator" hidden>
+    <h2><span id="dot" class="dot"></span>from the creator:</h2>
+    <div id="latest"></div>
+    <details id="older" hidden><summary>past messages</summary><div id="olderList"></div></details>
+  </section>
+
+  <section>
+    <h2>say it back</h2>
+    <textarea id="line" rows="2" maxlength="140" placeholder="type your statement. we'll make it a poster."></textarea>
+    <canvas id="cv" aria-label="poster preview"></canvas>
+    <button id="dl">download poster</button>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+/* ---------- from the creator: ---------- */
+function postEl(p, typed) {
+  const d = document.createElement('div'); d.className = 'msg';
+  const h = document.createElement('h3'); h.textContent = p.title;
+  const t = document.createElement('time');
+  if (p.date) t.textContent = new Date(p.date).toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}).toLowerCase();
+  const m = document.createElement('p');
+  d.append(h, t, m);
+  if (typed && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let i = 0; const id = setInterval(() => { m.textContent = p.message.slice(0, ++i); if (i >= p.message.length) clearInterval(id); }, 18);
+  } else m.textContent = p.message;
+  return d;
+}
+(async () => {
+  try {
+    const { posts } = await (await fetch('/api/creator')).json();
+    if (!posts || !posts.length) return;           // nothing published: section stays hidden
+    const [latest, ...older] = posts;
+    $('#creator').hidden = false;
+    $('#latest').append(postEl(latest, true));
+    if (older.length) { $('#older').hidden = false; older.forEach((p) => $('#olderList').append(postEl(p, false))); }
+    const key = latest.date + latest.title; let seen = null;
+    try { seen = localStorage.getItem('metsi-seen'); localStorage.setItem('metsi-seen', key); } catch {}
+    if (seen !== key) $('#dot').classList.add('on'); // glowing dot = new since last visit
+  } catch {}
+})();
+
+/* ---------- say it back: poster generator ---------- */
+const BRAND = { bg:'#0a1230', fg:'#eef0f6', accent:'#ffd23f', font:'"Helvetica Neue",Arial,sans-serif',
+                sign:'man enough to say it?', handle:'@manenoughtosayit' };
+const cv = $('#cv'), ctx = cv.getContext('2d'), W = 1080, H = 1350, PAD = 90;
+cv.width = W; cv.height = H;
+
+function wrap(text, max) {
+  const out = []; let cur = '';
+  for (const w of text.split(/\s+/)) {
+    const next = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(next).width > max && cur) { out.push(cur); cur = w; } else cur = next;
+  }
+  out.push(cur); return out;
+}
+function draw() {
+  const text = ($('#line').value.trim() || 'say it.').toLowerCase();
+  ctx.fillStyle = BRAND.bg; ctx.fillRect(0, 0, W, H);
+  let size = 150, lines;
+  for (; size > 40; size -= 4) {
+    ctx.font = `700 ${size}px ${BRAND.font}`; lines = wrap(text, W - PAD * 2);
+    if (lines.length * size * 1.15 < H - 520) break;
+  }
+  ctx.fillStyle = BRAND.fg; ctx.textBaseline = 'top';
+  const y0 = (H - 300 - lines.length * size * 1.15) / 2;
+  lines.forEach((l, i) => ctx.fillText(l, PAD, y0 + i * size * 1.15));
+  ctx.fillStyle = BRAND.accent; ctx.fillRect(PAD, H - 250, 120, 6);
+  ctx.fillStyle = BRAND.fg; ctx.font = `700 38px ${BRAND.font}`; ctx.fillText(BRAND.sign, PAD, H - 215);
+  ctx.globalAlpha = .6; ctx.font = `400 30px ${BRAND.font}`; ctx.fillText(BRAND.handle, PAD, H - 160); ctx.globalAlpha = 1;
+}
+$('#line').addEventListener('input', draw);
+$('#dl').addEventListener('click', () => {
+  const a = document.createElement('a'); a.download = 'metsi-statement.png'; a.href = cv.toDataURL('image/png'); a.click();
+});
+draw();
+</script>
+</body>
+</html>
